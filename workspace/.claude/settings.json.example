@@ -1,0 +1,16 @@
+{
+  "_comment": "Copy to settings.local.json. AIRVIS_HOME is set by main.py before spawning claude.",
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Edit|Write|MultiEdit|NotebookEdit|Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "$AIRVIS_HOME/.venv/bin/python $AIRVIS_HOME/tools/voice_permission_hook.py"
+          }
+        ]
+      }
+    ]
+  }
+}

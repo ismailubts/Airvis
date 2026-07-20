@@ -1,0 +1,198 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<title>Airvis test client</title>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;600;700&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet" />
+<style>
+  :root {
+    --ink: #1a2332;
+    --muted: #5a6a7a;
+    --panel: rgba(255, 252, 247, 0.88);
+    --accent: #0d7a6f;
+    --accent-hover: #0a635a;
+    --danger: #b33a3a;
+    --line: #c8d0d8;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    min-height: 100vh;
+    font-family: "DM Sans", sans-serif;
+    color: var(--ink);
+    background:
+      radial-gradient(ellipse 80% 50% at 10% 0%, #d4ebe7 0%, transparent 55%),
+      radial-gradient(ellipse 70% 45% at 100% 100%, #e8dcc8 0%, transparent 50%),
+      linear-gradient(160deg, #f7f3eb 0%, #eef2f4 55%, #e6ecea 100%);
+  }
+  main {
+    max-width: 520px;
+    margin: 0 auto;
+    padding: 48px 20px 64px;
+  }
+  h1 {
+    font-size: 2.25rem;
+    font-weight: 700;
+    letter-spacing: -0.03em;
+    margin: 0 0 8px;
+  }
+  .tagline {
+    color: var(--muted);
+    margin: 0 0 28px;
+    line-height: 1.45;
+  }
+  .panel {
+    background: var(--panel);
+    border: 1px solid var(--line);
+    border-radius: 14px;
+    padding: 20px;
+    backdrop-filter: blur(8px);
+  }
+  button {
+    font-family: inherit;
+    font-size: 16px;
+    font-weight: 600;
+    padding: 12px 18px;
+    border-radius: 10px;
+    border: 1px solid transparent;
+    cursor: pointer;
+  }
+  button:disabled { opacity: 0.4; cursor: not-allowed; }
+  #callBtn {
+    background: var(--accent);
+    color: #fff;
+  }
+  #callBtn:hover:not(:disabled) { background: var(--accent-hover); }
+  #hangBtn {
+    background: #fff;
+    border-color: var(--line);
+    color: var(--danger);
+  }
+  #status {
+    margin-top: 16px;
+    padding: 12px;
+    background: #1a2332;
+    color: #c8e6df;
+    border-radius: 10px;
+    white-space: pre-wrap;
+    font-family: "IBM Plex Mono", ui-monospace, monospace;
+    font-size: 12px;
+    max-height: 220px;
+    overflow: auto;
+  }
+  .row { display: flex; gap: 10px; align-items: center; margin: 10px 0; }
+  label { font-size: 13px; color: var(--muted); min-width: 52px; }
+  input {
+    padding: 10px 12px;
+    font-size: 14px;
+    flex: 1;
+    border-radius: 8px;
+    border: 1px solid var(--line);
+    font-family: "IBM Plex Mono", ui-monospace, monospace;
+    background: #fff;
+  }
+</style>
+</head>
+<body>
+<main>
+  <h1>Airvis</h1>
+  <p class="tagline">Browser smoke test for the Mac WebRTC server. Mic in, voice out.</p>
+  <div class="panel">
+    <div class="row">
+      <label>Server</label>
+      <input id="server" value="http://localhost:7860" />
+    </div>
+    <div class="row">
+      <button id="callBtn">Call Airvis</button>
+      <button id="hangBtn" disabled>Hang up</button>
+    </div>
+    <audio id="remoteAudio" autoplay playsinline></audio>
+    <div id="status">idle</div>
+  </div>
+</main>
+
+<script>
+const log = (m) => {
+  const el = document.getElementById('status');
+  el.textContent = (new Date().toISOString().slice(11,19)) + '  ' + m + '\n' + el.textContent;
+};
+
+let pc = null;
+let localStream = null;
+
+document.getElementById('callBtn').onclick = async () => {
+  try {
+    const server = document.getElementById('server').value.replace(/\/$/, '');
+    document.getElementById('callBtn').disabled = true;
+
+    log('requesting mic…');
+    localStream = await navigator.mediaDevices.getUserMedia({ audio: true, video: false });
+
+    pc = new RTCPeerConnection({
+      iceServers: [{ urls: 'stun:stun.l.google.com:19302' }],
+    });
+
+    pc.ontrack = (ev) => {
+      log('remote track: ' + ev.track.kind);
+      document.getElementById('remoteAudio').srcObject = ev.streams[0];
+    };
+    pc.oniceconnectionstatechange = () => log('ICE: ' + pc.iceConnectionState);
+    pc.onconnectionstatechange = () => log('PC:  ' + pc.connectionState);
+
+    for (const track of localStream.getTracks()) {
+      pc.addTrack(track, localStream);
+    }
+    // Need to receive audio back from Airvis even though we're not sending video.
+    pc.addTransceiver('audio', { direction: 'sendrecv' });
+
+    const offer = await pc.createOffer({ offerToReceiveAudio: true });
+    await pc.setLocalDescription(offer);
+
+    // Wait for ICE gathering to complete so we can ship a fully-baked SDP
+    // without the trickle-ICE PATCH dance. Simpler for the first test.
+    await new Promise((resolve) => {
+      if (pc.iceGatheringState === 'complete') return resolve();
+      const check = () => {
+        if (pc.iceGatheringState === 'complete') {
+          pc.removeEventListener('icegatheringstatechange', check);
+          resolve();
+        }
+      };
+      pc.addEventListener('icegatheringstatechange', check);
+    });
+
+    log('posting offer → ' + server + '/api/offer');
+    const resp = await fetch(server + '/api/offer', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        sdp: pc.localDescription.sdp,
+        type: pc.localDescription.type,
+      }),
+    });
+    if (!resp.ok) {
+      throw new Error('server ' + resp.status + ': ' + (await resp.text()));
+    }
+    const answer = await resp.json();
+    log('got answer pc_id=' + answer.pc_id);
+    await pc.setRemoteDescription({ sdp: answer.sdp, type: answer.type });
+    document.getElementById('hangBtn').disabled = false;
+  } catch (e) {
+    log('error: ' + e.message);
+    document.getElementById('callBtn').disabled = false;
+  }
+};
+
+document.getElementById('hangBtn').onclick = () => {
+  if (pc) { pc.close(); pc = null; }
+  if (localStream) { localStream.getTracks().forEach((t) => t.stop()); localStream = null; }
+  document.getElementById('remoteAudio').srcObject = null;
+  document.getElementById('callBtn').disabled = false;
+  document.getElementById('hangBtn').disabled = true;
+  log('hung up');
+};
+</script>
+</body>
+</html>
