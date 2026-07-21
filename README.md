@@ -1,5 +1,8 @@
 # Airvis
 
+**Author:** [Abdul Ismail](https://github.com/ismailubts)  
+**Repository:** https://github.com/ismailubts/Airvis
+
 Voice-controlled laptop assistant. Mic in, Claude Code as the brain, voice out.
 Everything runs locally — STT, TTS, and audio I/O on your machine — except for
 whichever cloud providers you wire up for higher-quality speech.
@@ -338,6 +341,10 @@ Same shape: create `airvis/stt/<provider>.py`, register it in
 - **Voice permission prompts.** Tool permission requests are currently
   auto-denied. A spoken "Claude wants to read X — allow?" handoff is the
   intended fix.
+
+## License
+
+Proprietary — Copyright (c) Abdul Ismail. See [LICENSE](LICENSE).
 
 ---
 
